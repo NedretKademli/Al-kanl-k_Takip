@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Alışkanlık Takip</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#4f46e5" />
+  <style>
+    /* Basit, temiz stiller */
+    body{font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;margin:0;padding:18px}
+    .container{max-width:900px;margin:0 auto}
+    header h1{margin:0 0 6px;font-size:22px}
+    .card{background:#fff;padding:14px;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:12px}
+    form{display:flex;gap:8px}
+    input[type="text"]{flex:1;padding:8px;border:1px solid #e5e7eb;border-radius:8px}
+    button{background:#4f46e5;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+    .habit{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px dashed #eef2ff}
+    .habit:last-child{border-bottom:none}
+    .small{font-size:12px;color:#6b7280}
+    .grid{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+    .day{width:28px;height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;border:1px solid #e5e7eb;cursor:pointer}
+    .day.done{background:#4f46e5;color:white;border-color:transparent}
+    .btn-plain{background:transparent;border:1px solid #e5e7eb;padding:6px;border-radius:8px;cursor:pointer}
+    .danger{color:#dc2626;background:transparent;border:none;cursor:pointer}
+    footer{font-size:12px;color:#6b7280;text-align:center;margin-top:10px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="card">
+      <h1>Alışkanlık Takip</h1>
+      <div class="small">Günlük işaretle, seri (streak) sayısını gör. Tarayıcıda kaydedilir.</div>
+    </header>
+
+    <section class="card">
+      <form id="addForm">
+        <input id="habitName" type="text" placeholder="Yeni alışkanlık (ör: Su içmek)" />
+        <button type="submit">Ekle</button>
+      </form>
+    </section>
+
+    <div id="list"></div>
+
+    <footer>
+      Uygulamayı ana ekrana eklemek için: Telefonunda siteyi aç → tarayıcı menüsü → "Ana ekrana ekle".
+    </footer>
+  </div>
+
+<script>
+/* Basit Alışkanlık Takip - Vanilla JS
+   - localStorage: 'habit-tracker:v1'
+   - her habit: { id, name, createdAt, history: { 'YYYY-MM-DD': true } }
+*/
+
+const KEY = 'habit-tracker:v1';
+
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function lastNDays(n){
+  const arr=[];
+  const now=new Date();
+  for(let i=n-1;i>=0;i--){
+    const d=new Date(now);
+    d.setDate(d.getDate()-i);
+    arr.push(d.toISOString().slice(0,10));
+  }
+  return arr;
+}
+
+function load(){
+  try{
+    return JSON.parse(localStorage.getItem(KEY)) || {habits:[]};
+  }catch(e){ return {habits:[]}; }
+}
+function save(data){ localStorage.setItem(KEY, JSON.stringify(data)); }
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+function computeStreak(history){
+  // Bugünden geriye ardışık işaretli günleri say
+  let count = 0;
+  const h = history || {};
+  let cursor = new Date();
+  while(true){
+    const iso = cursor.toISOString().slice(0,10);
+    if(h[iso]){ count++; cursor.setDate(cursor.getDate()-1); }
+    else break;
+  }
+  return count;
+}
+
+function render(){
+  const root = document.getElementById('list');
+  const state = load();
+  root.innerHTML = '';
+  if(state.habits.length === 0){
+    root.innerHTML = '<div class="card small">Henüz alışkanlığınız yok. Yukarıdan ekleyin.</div>';
+    return;
+  }
+
+  state.habits.forEach(habit => {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const top = document.createElement('div');
+    top.className = 'habit';
+    const left = document.createElement('div');
+    left.innerHTML = `<div style="font-weight:600">${escapeHtml(habit.name)}</div><div class="small">Eklenme: ${new Date(habit.createdAt).toLocaleDateString()}</div>`;
+    const right = document.createElement('div');
+    right.innerHTML = `<div class="small">Seri: <strong>${computeStreak(habit.history)}</strong></div>`;
+
+    const controls = document.createElement('div');
+    controls.style.display = 'flex';
+    controls.style.gap='8px';
+    const todayBtn = document.createElement('button');
+    todayBtn.className = 'btn-plain';
+    todayBtn.textContent = (habit.history && habit.history[todayISO()]) ? 'Bugün ✓' : 'Bugün?';
+    todayBtn.onclick = () => { toggleDate(habit.id, todayISO()); };
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'danger';
+    delBtn.textContent = 'Sil';
+    delBtn.onclick = () => { if(confirm('Silmek istediğine emin misin?')) removeHabit(habit.id); };
+
+    controls.appendChild(todayBtn);
+    controls.appendChild(delBtn);
+
+    top.appendChild(left);
+    top.appendChild(right);
+    top.appendChild(controls);
+
+    card.appendChild(top);
+
+    // 30 günlük grid
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    const days = lastNDays(30);
+    days.forEach(d => {
+      const cell = document.createElement('div');
+      cell.className = 'day' + ((habit.history && habit.history[d]) ? ' done' : '');
+      cell.textContent = d.slice(8);
+      cell.title = d;
+      cell.onclick = () => toggleDate(habit.id, d);
+      grid.appendChild(cell);
+    });
+    card.appendChild(grid);
+
+    root.appendChild(card);
+  });
+}
+
+function toggleDate(habitId, dateISO){
+  const state = load();
+  state.habits = state.habits.map(h => {
+    if(h.id !== habitId) return h;
+    const hist = Object.assign({}, h.history || {});
+    if(hist[dateISO]) delete hist[dateISO]; else hist[dateISO] = true;
+    return Object.assign({}, h, {history: hist});
+  });
+  save(state); render();
+}
+
+function removeHabit(id){
+  const state = load();
+  state.habits = state.habits.filter(h => h.id !== id);
+  save(state); render();
+}
+
+function addHabit(name){
+  const state = load();
+  const habit = { id: uid(), name: name, createdAt: new Date().toISOString(), history: {} };
+  state.habits.unshift(habit);
+  save(state); render();
+}
+
+function escapeHtml(s){ return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+// Form
+document.getElementById('addForm').addEventListener('submit', function(e){
+  e.preventDefault();
+  const v = document.getElementById('habitName').value.trim();
+  if(!v){ alert('Lütfen bir isim gir.'); return; }
+  addHabit(v);
+  document.getElementById('habitName').value = '';
+});
+
+// İlk render
+render();
+
+/* ServiceWorker kaydı (varsa) */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').then(() => {
+      // kayıt oldu
+    }).catch(()=>{/* kayıt başarısız olabilir, sorun değil */});
+  });
+}
+</script>
+</body>
+</html>
